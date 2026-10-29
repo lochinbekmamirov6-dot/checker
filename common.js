@@ -7,7 +7,7 @@ const tm = d => new Date(d).toLocaleTimeString("en-GB", { timeZone: TZ, hour: "2
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: TZ });
 const lab = r => r.kind == "in" ? (r.status == "ok" ? "Vaqtida" : "Kechikdi") : (r.status == "ok" ? "Vaqtida ketdi" : "Erta ketdi");
 const IC = p => '<svg class="i" viewBox="0 0 24 24">' + p + '</svg>';
-const LOGO = '<svg class="logo" viewBox="0 0 100 100"><defs><linearGradient id="lgg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#A855F7"/><stop offset="1" stop-color="#3B82F6"/></linearGradient></defs><rect width="100" height="100" rx="24" fill="#070815"/><path d="M72 29A30 30 0 1 0 72 71" fill="none" stroke="url(#lgg)" stroke-width="11" stroke-linecap="round"/><path d="M40 51l10 10 22-24" fill="none" stroke="#22D3EE" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const LOGO = '<img src="icon.svg" alt="Logo" style="width: 35px; height: 35px; object-fit: contain; vertical-align: middle;">';
 document.documentElement.dataset.theme = localStorage.getItem("ck_theme") || "dark";
 function theme(t) { document.documentElement.dataset.theme = t; localStorage.setItem("ck_theme", t); }
 function toast(m) { const t = $("toast"); t.textContent = m; t.className = "on"; setTimeout(() => t.className = "", 3500); }
