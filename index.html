@@ -3,8 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<link rel="icon" type="image/svg+xml"
-  href="/icon.svg">
+<link rel="icon" href="/icon.svg">
 <title>CHECKER · Rahbar paneli</title>
 <link rel="stylesheet" href="/style.css">
 </head>
@@ -25,12 +24,11 @@ async function boot() {
   V.className = "wide";
   const r = await SB.from("profiles").select("*").eq("role", "admin").order("created_at");
   A = r.data || [];
-  if (!sub) { sub = true; SB.channel("mm").on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, () => { const a = document.activeElement; if (!a || a.tagName != "INPUT") draw(); }).subscribe(); }
+  if (!sub) { sub = true; SB.channel("mm").on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, () => { const a = document.activeElement; if ((!a || a.tagName != "INPUT") && (pg == "msg" || pg == "home")) draw(); }).subscribe(); }
   draw();
 }
 async function draw() {
-  const { data: att } = await SB.from("attendance").select("*").eq("day", today());
-  const { data: um } = await SB.from("messages").select("admin_id,sender_id").is("read_at", null);
+  const [{ data: att }, { data: um }] = await Promise.all([SB.from("attendance").select("*").eq("day", today()), SB.from("messages").select("admin_id,sender_id").is("read_at", null)]);
   const un = A.map(a => (um || []).filter(m => m.admin_id == a.id && m.sender_id == a.id).length), tot = un.reduce((s, x) => s + x, 0);
   const pages = { home: pHome, adm: pAdm, att: pAtt, gen: pGen, rep: pRep, msg: pMsg, set: pSet };
   const main = await (pages[pg] || pSoon)(att || [], un);
@@ -51,19 +49,19 @@ const pHome = att => {
 };
 const pAdm = att => '<h2>Administratorlar</h2><div class="f" style="max-width:340px"><input id="qs" placeholder="Qidirish…" value="' + esc(q) + '" oninput="q=this.value;draw().then(()=>{const s=$(\'qs\');s.focus();s.setSelectionRange(99,99)})"></div>' + tbl(A.filter(a => nm(a.id).toLowerCase().includes(q.toLowerCase())), att);
 async function pAtt() {
-  const { data } = await SB.from("attendance").select("*").order("at", { ascending: false }).limit(60), d = data || [];
+  const { data } = await SB.from("attendance").select("*").order("at", { ascending: false }).limit(15), d = data || [];
   const u = await Promise.all(d.map(r => r.photo_path ? signed(r.photo_path) : ""));
-  return '<h2>Davomat</h2><div class="glass tb"><table><tr><th>Administrator</th><th>Turi</th><th>Vaqt</th><th>Holat</th><th>Selfi</th></tr>' + d.map((r, i) => '<tr><td>' + esc(nm(r.admin_id)) + '</td><td>' + (r.kind == "in" ? "Keldi" : "Ketdi") + '</td><td>' + fm(r.at) + '</td><td>' + pill(r.status == "ok" ? "ok" : "err", lab(r)) + '</td><td>' + (u[i] ? '<a href="' + u[i] + '" target="_blank"><img class="th" src="' + u[i] + '" alt=""></a>' : "") + '</td></tr>').join("") + '</table></div>';
+  return '<h2>Davomat</h2><div class="glass tb"><table><tr><th>Administrator</th><th>Turi</th><th>Vaqt</th><th>Holat</th><th>Selfi</th></tr>' + d.map((r, i) => '<tr><td>' + esc(nm(r.admin_id)) + '</td><td>' + (r.kind == "in" ? "Keldi" : "Ketdi") + '</td><td>' + fm(r.at) + '</td><td>' + pill(r.status == "ok" ? "ok" : "err", lab(r)) + '</td><td>' + (u[i] ? '<a href="' + u[i] + '" target="_blank"><img loading="lazy" decoding="async" class="th" src="' + u[i] + '" alt=""></a>' : "") + '</td></tr>').join("") + '</table></div>';
 }
 async function pGen() {
-  const { data } = await SB.from("cleaning_photos").select("*").order("taken_at", { ascending: false }).limit(48), d = data || [];
+  const { data } = await SB.from("cleaning_photos").select("*").order("taken_at", { ascending: false }).limit(24), d = data || [];
   const u = await Promise.all(d.map(r => signed(r.photo_path)));
-  return '<h2>Genuborka</h2><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">' + d.map((r, i) => '<div class="glass p"><a href="' + u[i] + '" target="_blank"><img class="big" src="' + u[i] + '" alt=""></a><b>' + esc(nm(r.admin_id)) + '</b><div class="m">' + fm(r.taken_at) + '</div></div>').join("") + '</div>' + (d.length ? "" : '<p class="m">Hali surat yo‘q.</p>');
+  return '<h2>Genuborka</h2><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">' + d.map((r, i) => '<div class="glass p"><a href="' + u[i] + '" target="_blank"><img loading="lazy" decoding="async" class="big" src="' + u[i] + '" alt=""></a><b>' + esc(nm(r.admin_id)) + '</b><div class="m">' + fm(r.taken_at) + '</div></div>').join("") + '</div>' + (d.length ? "" : '<p class="m">Hali surat yo‘q.</p>');
 }
 async function pRep() {
-  const { data } = await SB.from("reports").select("*").order("created_at", { ascending: false }).limit(30), d = data || [];
+  const { data } = await SB.from("reports").select("*").order("created_at", { ascending: false }).limit(15), d = data || [];
   const u = await Promise.all(d.map(async r => Promise.all([r.photo1_path, r.photo2_path].filter(Boolean).map(signed))));
-  return '<h2>Otchyotlar</h2>' + d.map((r, i) => '<div class="glass p" style="margin-bottom:14px"><b>' + esc(nm(r.admin_id)) + '</b> <span class="m">· ' + fm(r.created_at) + '</span><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">' + u[i].map(x => '<a href="' + x + '" target="_blank"><img class="big" src="' + x + '" alt=""></a>').join("") + '</div></div>').join("") + (d.length ? "" : '<p class="m">Hali otchyot yuborilmagan.</p>');
+  return '<h2>Otchyotlar</h2>' + d.map((r, i) => '<div class="glass p" style="margin-bottom:14px"><b>' + esc(nm(r.admin_id)) + '</b> <span class="m">· ' + fm(r.created_at) + '</span><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">' + u[i].map(x => '<a href="' + x + '" target="_blank"><img loading="lazy" decoding="async" class="big" src="' + x + '" alt=""></a>').join("") + '</div></div>').join("") + (d.length ? "" : '<p class="m">Hali otchyot yuborilmagan.</p>');
 }
 async function pMsg(att, un) {
   if (!A.length) return '<h2>Xabarlar</h2><p class="m">Hali administrator yo‘q.</p>';
