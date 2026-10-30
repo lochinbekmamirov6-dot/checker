@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="/icon.svg">
+<title>CHECKER · Rahbar paneli</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="v"></div><div id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="/common.js"></script>
+<script>
+const V = $("v");
+let P = null, pg = "home", sel = null, q = "", A = [], sub = false;
+const MENU = [["home", "Bosh sahifa"], ["adm", "Administratorlar"], ["att", "Davomat"], ["gen", "Genuborka"], ["rep", "Otchyotlar"], ["task", "Vazifalar"], ["iss", "Muammolar"], ["msg", "Xabarlar"], ["set", "Sozlamalar"]];
+const nm = id => { const a = A.find(x => x.id == id); return a ? (a.first_name ? a.first_name + " " + a.last_name : a.username) : "?"; };
+
+async function boot() {
+  const [pp, rr] = await Promise.all([me(), SB.from("profiles").select("*").eq("role", "admin").order("created_at")]);
+  P = pp;
+  if (!P) return loginView(V, "", boot);
+  if (P.role != "manager") { await SB.auth.signOut(); P = null; return loginView(V, "Bu sahifa faqat rahbar uchun.", boot); }
+  V.className = "wide";
+  A = rr.data || [];
+  if (!sub) { sub = true; SB.channel("mm").on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, () => { const a = document.activeElement; if ((!a || a.tagName != "INPUT") && (pg == "msg" || pg == "home")) draw(); }).subscribe(); }
+  draw().then(warm);
+}
+let DET = null, CH = {}, TOK = 0, LAST = [], TOT = 0;
+function shell(main) {
+  V.innerHTML = '<div class="nopc"><div><h2>CHECKER · Rahbar</h2><p class="m">Bu panel faqat kompyuterda ochiladi.</p></div></div><div class="lay pcOnly"><aside class="side"><div class="bd0">' + LOGO + 'CHECKER</div>' +
+    MENU.map(([k, n]) => '<button class="' + (k == pg ? "on" : "") + '" onclick="pg=\'' + k + '\';DET=null;draw()">' + n + (k == "msg" && TOT ? '<i class="bd">' + TOT + '</i>' : "") + '</button>').join("") +
+    '</aside><main class="main">' + main + '</main></div>';
+  if (pg == "msg") { const m = $("ms"); if (m) m.scrollTop = m.scrollHeight; }
+}
+async function warm() { await Promise.all([["att", pAtt], ["gen", pGen], ["rep", pRep], ["task", pTask], ["iss", pIss]].map(async ([k, f]) => { try { CH[k + "|"] = await f(); } catch (e) {} })); }
+async function draw() {
+  if (pg == "msg" && !sel && A.length) sel = A[0].id;
+  const my = ++TOK, key = pg + "|" + (pg == "msg" ? sel : "");
+  if (DET) { shell('<p class="m">Yuklanmoqda…</p>'); const dm = await pDet(); if (my == TOK) shell(dm); return; }
+  shell(CH[key] || '<h2>' + (MENU.find(x => x[0] == pg) || [0, ""])[1] + '</h2><p class="m">Yuklanmoqda…</p>');
+  const base = Promise.all([SB.from("attendance").select("*").eq("day", today()), SB.from("messages").select("admin_id,sender_id").is("read_at", null)]);
+  const pages = { home: pHome, adm: pAdm, att: pAtt, gen: pGen, rep: pRep, task: pTask, iss: pIss, msg: pMsg, set: pSet };
+  const f = pages[pg] || pSoon;
+  const [b, main] = await Promise.all([base, (pg == "home" || pg == "adm") ? base.then(x => f(x[0].data || [])) : f()]);
+  if (my != TOK) return;
+  LAST = b[0].data || [];
+  const um = b[1].data || [];
+  TOT = A.reduce((s, a) => s + um.filter(x => x.admin_id == a.id && x.sender_id == a.id).length, 0);
+  CH[key] = main;
+  shell(main);
+}
+const pill = (c, t) => '<span class="pill ' + c + '">' + t + '</span>';
+const tbl = (l, att) => '<div class="glass tb"><table><tr><th>Administrator</th><th>BTP</th><th>Holat</th><th>Keldi</th><th>Ketdi</th><th></th></tr>' + l.map(a => {
+  const i = att.find(r => r.admin_id == a.id && r.kind == "in"), o = att.find(r => r.admin_id == a.id && r.kind == "out");
+  return '<tr><td>' + esc(nm(a.id)) + '</td><td>' + esc(a.btp || "—") + '</td><td>' + (i ? pill(i.status == "ok" ? "ok" : "err", i.status == "ok" ? "Keldi" : "Kechikdi") : pill("warn", "Kelmadi")) + '</td><td>' + (i ? tm(i.at) : "—") + '</td><td>' + (o ? tm(o.at) + (o.status == "ok" ? " ✓" : " ⚠ erta") : "—") + '</td><td><button class="lk" onclick="sel=\'' + a.id + '\';pg=\'msg\';DET=null;draw()">Xabar</button></td></tr>';
+}).join("") + '</table>' + (l.length ? "" : '<p class="m c" style="padding:20px">Hali administrator yo‘q.</p>') + '</div>';
+
+const pHome = att => {
+  const ins = att.filter(r => r.kind == "in"), late = ins.filter(r => r.status == "late").length;
+  return '<h2>Bosh sahifa</h2><div class="stats">' + [["Jami administratorlar", A.length], ["Bugun kelganlar", ins.length], ["Kechikkanlar", late], ["Kelmaganlar", A.length - ins.length]].map(([n, v]) => '<div class="glass p stat"><b>' + v + '</b><span class="m">' + n + '</span></div>').join("") + '</div>' + tbl(A, att);
+};
+const pAdm = att => '<h2>Administratorlar</h2><div class="f" style="max-width:340px"><input id="qs" placeholder="Qidirish…" value="' + esc(q) + '" oninput="q=this.value;$(\'tbw\').innerHTML=tbl(A.filter(a=>nm(a.id).toLowerCase().includes(q.toLowerCase())),LAST)"></div><div id="tbw">' + tbl(A.filter(a => nm(a.id).toLowerCase().includes(q.toLowerCase())), att) + '</div>';
+const ROWS = { att: {}, gen: {}, rep: {}, iss: {} };
+const btp = id => (A.find(x => x.id == id) || {}).btp || "—";
+function openDet(t, id) { DET = { t, id }; draw(); }
+const head = (a, d) => '<div class="top"><button class="lk" onclick="DET=null;draw()">‹ Orqaga</button><div><h2 style="margin:0">' + esc(nm(a)) + ' · ' + esc(btp(a)) + '</h2><div class="m">' + fm(d) + '</div></div></div>';
+const openBtn = (t, id) => '<button class="lk" onclick="openDet(\'' + t + '\',\'' + id + '\')">Ochish</button>';
+const empty = (n, t) => n ? "" : '<p class="m c" style="padding:20px">' + t + '</p>';
+async function pAtt() {
+  const { data } = await SB.from("attendance").select("*").order("at", { ascending: false }).limit(40), d = data || [];
+  d.forEach(r => ROWS.att[r.id] = r);
+  return '<h2>Davomat</h2><div class="glass tb"><table><tr><th>Administrator</th><th>BTP</th><th>Turi</th><th>Vaqt</th><th>Holat</th><th></th></tr>' + d.map(r => '<tr><td>' + esc(nm(r.admin_id)) + '</td><td>' + esc(btp(r.admin_id)) + '</td><td>' + (r.kind == "in" ? "Keldi" : "Ketdi") + '</td><td>' + fm(r.at) + '</td><td>' + pill(r.status == "ok" ? "ok" : "err", lab(r)) + '</td><td>' + (r.photo_path ? openBtn("att", r.id) : "") + '</td></tr>').join("") + '</table>' + empty(d.length, "Hali yozuv yo‘q.") + '</div>';
+}
+async function pGen() {
+  const { data } = await SB.from("cleaning_photos").select("*").order("taken_at", { ascending: false }).limit(80), G = [];
+  (data || []).forEach(r => { let g = G.find(x => x.id == r.batch_id); if (!g) { g = { id: r.batch_id, admin_id: r.admin_id, d: r.taken_at, p: [] }; G.push(g); ROWS.gen[g.id] = g; } g.p.unshift(r); });
+  return '<h2>Genuborka</h2><div class="glass tb"><table><tr><th>Administrator</th><th>BTP</th><th>Sana</th><th>Suratlar</th><th></th></tr>' + G.map(g => '<tr><td>' + esc(nm(g.admin_id)) + '</td><td>' + esc(btp(g.admin_id)) + '</td><td>' + fm(g.d) + '</td><td>' + g.p.length + ' ta</td><td>' + openBtn("gen", g.id) + '</td></tr>').join("") + '</table>' + empty(G.length, "Hali surat yo‘q.") + '</div>';
+}
+async function pRep() {
+  const { data } = await SB.from("reports").select("*").order("created_at", { ascending: false }).limit(40), d = data || [];
+  d.forEach(r => ROWS.rep[r.id] = r);
+  return '<h2>Otchyotlar</h2><div class="glass tb"><table><tr><th>Administrator</th><th>BTP</th><th>Sana</th><th>Rasmlar</th><th></th></tr>' + d.map(r => '<tr><td>' + esc(nm(r.admin_id)) + '</td><td>' + esc(btp(r.admin_id)) + '</td><td>' + fm(r.created_at) + '</td><td>' + [r.photo1_path, r.photo2_path].filter(Boolean).length + ' ta</td><td>' + openBtn("rep", r.id) + '</td></tr>').join("") + '</table>' + empty(d.length, "Hali otchyot yuborilmagan.") + '</div>';
+}
+async function pIss() {
+  const { data } = await SB.from("issues").select("*").order("created_at", { ascending: false }).limit(60), d = data || [];
+  d.forEach(r => ROWS.iss[r.id] = r);
+  return '<h2>Muammolar</h2><p class="m" style="margin-bottom:12px">Administratorlar yuborgan muammolar. Ochib, hal qilindi deb belgilang.</p><div class="glass tb"><table><tr><th>Administrator</th><th>BTP</th><th>Muammo</th><th>Sana</th><th>Holat</th><th></th></tr>' + d.map(r => '<tr><td>' + esc(nm(r.admin_id)) + '</td><td>' + esc(btp(r.admin_id)) + '</td><td>' + esc(r.body.slice(0, 60)) + '</td><td>' + fm(r.created_at) + '</td><td>' + (r.status == "open" ? pill("err", "Ochiq") : pill("ok", "Hal qilindi")) + '</td><td>' + openBtn("iss", r.id) + '</td></tr>').join("") + '</table>' + empty(d.length, "Muammo yuborilmagan.") + '</div>';
+}
+async function pTask() {
+  const { data } = await SB.from("tasks").select("*").order("created_at", { ascending: false }).limit(60), d = data || [];
+  return '<h2>Vazifalar</h2><p class="m" style="margin-bottom:12px">Administratorlarga topshiriq bering. U ularning ilovasida “Vazifalar” bo‘limida chiqadi, bajarilgach shu yerda ko‘rinadi.</p><div class="glass p" style="margin-bottom:16px;max-width:760px"><b>Yangi vazifa</b><div class="row2" style="margin-top:10px"><div class="f" style="margin:0"><select id="ta" style="flex:1;background:transparent;border:0;color:inherit;height:54px;outline:0"><option value="all">Barcha administratorlar</option>' + A.map(a => '<option value="' + a.id + '">' + esc(nm(a.id)) + '</option>').join("") + '</select></div><div class="f" style="margin:0"><input id="td" type="date"></div></div><div class="f" style="margin-top:10px"><input id="tt" placeholder="Vazifa nomi"></div><div class="f"><input id="tn" placeholder="Izoh (ixtiyoriy)"></div><button class="lk" onclick="addTask()">Yuborish</button></div><div class="glass tb"><table><tr><th>Administrator</th><th>BTP</th><th>Vazifa</th><th>Muddat</th><th>Holat</th><th></th></tr>' + d.map(r => '<tr><td>' + esc(nm(r.admin_id)) + '</td><td>' + esc(btp(r.admin_id)) + '</td><td>' + esc(r.title) + '</td><td>' + (r.due_date || "—") + '</td><td>' + (r.status == "done" ? pill("ok", "Bajarildi " + tm(r.done_at)) : pill("warn", "Bajarilmagan")) + '</td><td><button class="lk" onclick="delTask(\'' + r.id + '\')">O‘chirish</button></td></tr>').join("") + '</table>' + empty(d.length, "Hali vazifa berilmagan.") + '</div>';
+}
+async function addTask() {
+  const t = $("tt").value.trim(); if (!t) return toast("Vazifa nomini yozing");
+  const w = $("ta").value, ids = w == "all" ? A.map(a => a.id) : [w];
+  if (!ids.length) return toast("Hali administrator yo‘q");
+  const rows = ids.map(id => ({ admin_id: id, title: t, note: $("tn").value.trim() || null, due_date: $("td").value || null, created_by: P.id }));
+  const { error } = await SB.from("tasks").insert(rows); if (error) return toast(error.message);
+  toast("Yuborildi"); CH["task|"] = null; draw();
+}
+async function delTask(id) { if (!confirm("O‘chirilsinmi?")) return; await SB.from("tasks").delete().eq("id", id); CH["task|"] = null; draw(); }
+async function resolveIss(id) { await SB.from("issues").update({ status: "resolved", resolved_at: new Date().toISOString() }).eq("id", id); CH["iss|"] = null; DET = null; draw(); }
+async function pDet() {
+  const d = DET, r = ROWS[d.t][d.id];
+  if (!r) { DET = null; return '<p class="m">Topilmadi.</p>'; }
+  if (d.t == "att") { const u = r.photo_path ? await signed(r.photo_path) : ""; return head(r.admin_id, r.at) + '<div class="glass p" style="max-width:560px"><p style="margin-bottom:10px"><b>' + (r.kind == "in" ? "Keldi" : "Ketdi") + '</b> ' + pill(r.status == "ok" ? "ok" : "err", lab(r)) + '</p>' + (u ? '<img class="big" style="max-height:70vh" src="' + u + '" alt="">' : '<p class="m">Surat yo‘q.</p>') + '</div>'; }
+  if (d.t == "iss") { const u = r.photo_path ? await signed(r.photo_path) : ""; return head(r.admin_id, r.created_at) + '<div class="glass p" style="max-width:640px"><p style="margin-bottom:12px">' + esc(r.body) + '</p>' + (u ? '<img class="big" style="max-height:60vh" src="' + u + '" alt="">' : "") + '<div style="margin-top:14px">' + (r.status == "open" ? '<button class="lk" onclick="resolveIss(\'' + r.id + '\')">Hal qilindi deb belgilash</button>' : pill("ok", "Hal qilindi")) + '</div></div>'; }
+  const paths = d.t == "gen" ? r.p.map(x => x.photo_path) : [r.photo1_path, r.photo2_path].filter(Boolean);
+  const us = await Promise.all(paths.map(signed));
+  return head(r.admin_id, d.t == "gen" ? r.d : r.created_at) + '<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">' + us.map((u, i) => '<div class="glass p"><img class="big" style="max-height:75vh" src="' + u + '" alt=""><div class="m c" style="margin-top:6px">' + (d.t == "gen" ? fm(r.p[i].taken_at) : (i + 1) + '-rasm') + '</div></div>').join("") + '</div>';
+}
+async function pMsg() {
+  if (!A.length) return '<h2>Xabarlar</h2><p class="m">Hali administrator yo‘q.</p>';
+  if (!sel) sel = A[0].id;
+  const [{ data }, { data: um }] = await Promise.all([SB.from("messages").select("*").eq("admin_id", sel).order("created_at"), SB.from("messages").select("admin_id,sender_id").is("read_at", null)]);
+  const un = A.map(a => (um || []).filter(x => x.admin_id == a.id && x.sender_id == a.id).length);
+  SB.from("messages").update({ read_at: new Date().toISOString() }).eq("admin_id", sel).eq("sender_id", sel).is("read_at", null).then(() => {});
+  return '<h2>Xabarlar</h2><div class="two"><div class="glass list">' + A.map((a, i) => '<button class="li' + (a.id == sel ? " on" : "") + '" onclick="sel=\'' + a.id + '\';draw()"><b>' + esc(nm(a.id)) + '</b><span class="m">' + esc(a.btp || "") + '</span>' + (un[i] && a.id != sel ? '<i class="bd">' + un[i] + '</i>' : "") + '</button>').join("") +
+    '</div><div class="glass thread"><b>' + esc(nm(sel)) + '</b><div class="m">Faqat shu administrator bilan yozishma</div><div class="msgs" id="ms">' + ((data || []).map(m => '<div class="b' + (m.sender_id == P.id ? " me" : "") + '">' + esc(m.body) + '<small>' + fm(m.created_at) + '</small></div>').join("") || '<p class="m c">Hali yozishma yo‘q.</p>') +
+    '</div><div class="send"><input id="rp" placeholder="Javob yozing…" onkeydown="if(event.key==\'Enter\')reply()"><button class="lk" onclick="reply()">Yuborish</button></div></div></div>';
+}
+async function reply() {
+  const x = $("rp").value.trim(); if (!x) return;
+  const { error } = await SB.from("messages").insert({ admin_id: sel, sender_id: P.id, body: x });
+  if (error) toast(error.message);
+  await draw(); const i = $("rp"); if (i) i.focus();
+}
+const pSet = () => '<h2>Sozlamalar</h2><div class="glass p" style="max-width:520px"><p><b>' + esc(P.username) + '</b> · rahbar</p><p class="m" style="margin:10px 0">Yangi administrator qo‘shish: Supabase → Authentication → Users → Add user. Email: <b>login@checker.app</b>, Auto Confirm yoqilgan. Administrator birinchi kirishda ism-familiya va BTP ni o‘zi to‘ldiradi.</p><div class="row2"><button class="lk" onclick="theme(\'dark\')">Qorong‘i</button><button class="lk" onclick="theme(\'light\')">Yorug‘</button></div><button class="lk" style="margin-top:14px" onclick="SB.auth.signOut().then(()=>location.reload())">Chiqish</button></div>';
+const pSoon = () => '<h2>' + MENU.find(x => x[0] == pg)[1] + '</h2><div class="glass p m">Bu bo‘lim keyingi bosqichda qo‘shiladi.</div>';
+boot();
+</script>
+</body>
+</html>
